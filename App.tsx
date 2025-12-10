@@ -74,39 +74,63 @@ const App: React.FC = () => {
 
     setIsComposing(true);
 
-    // Call Hugging Face MusicGen API
-    const audio = await generateVibe({
-      emotion: selectedEmotion,
-      styles: styles
-    });
+    try {
+      // Map Emotion Enum to Chinese keys expected by audioEngine
+      // TODO: Move this mapping to audioEngine.ts for better cohesion
+      const emotionMap: Record<string, string> = {
+        'HAPPY': '快樂',
+        'SAD': '憂鬱',
+        'ANGRY': '憤怒',
+        'CALM': '平靜',
+        'EXCITED': '興奮'
+      };
 
-    if (!audio) {
-      alert("❌ Vibe 連接失敗，請檢查 API Token 或網路連線");
+      const emotionKey = selectedEmotion ? (emotionMap[selectedEmotion] || '') : '';
+
+      // Call Hugging Face MusicGen API
+      // FIX: Changed from object argument to positional arguments (emotion, styles, duration)
+      const audioBlob = await generateVibe(
+        emotionKey,
+        styles,
+        duration
+      );
+
+      if (!audioBlob) {
+        throw new Error("Vibe 生成失敗，未返回音頻數據");
+      }
+
+      // Convert Blob to Audio object
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      setCurrentAudio(audio);
+      // setIsComposing(false) is handled in finally block to ensure it resets even on error
+      setIsPlaying(true);
+      setHasPlayed(true);
+      setTimeLeft(duration);
+
+      // Play the generated audio
+      audio.loop = true; // Loop the music
+      audio.volume = djControls.volume / 100;
+      await audio.play();
+
+      // Start timer
+      timerRef.current = window.setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            handleStop();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+    } catch (error) {
+      console.error("Music Generation Error:", error);
+      alert(error instanceof Error ? error.message : "Vibe 連接失敗，請檢查網路連線");
+    } finally {
       setIsComposing(false);
-      return;
     }
-
-    setCurrentAudio(audio);
-    setIsComposing(false);
-    setIsPlaying(true);
-    setHasPlayed(true);
-    setTimeLeft(duration);
-
-    // Play the generated audio
-    audio.loop = true; // Loop the music
-    audio.volume = djControls.volume / 100;
-    audio.play();
-
-    // Start timer
-    timerRef.current = window.setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          handleStop();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
   };
 
   const handleStop = () => {
