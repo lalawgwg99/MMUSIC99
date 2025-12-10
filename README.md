@@ -1,4 +1,4 @@
-# 🎵 AI Station - 智能音樂生成器
+# 🎵 音樂生成器
 
 > Oracle 設計 × AI 靈魂 = 終極音樂創作體驗
 
@@ -185,7 +185,7 @@ MIT License - 自由使用、修改、分發
 
 ## 🎵 開始創作
 
-**不再只是製造聲音，而是創造生命！**
+
 
 立即訪問：[AI Station](https://github.com/lalawgwg99/MMUSIC99)
 
