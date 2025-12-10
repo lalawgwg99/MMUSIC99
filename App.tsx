@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, VibeStyle, DurationOption, MixRecipe, MusicalSection, Emotion, DJControls, ExportStatus, AIPreferences } from './types';
 import { TRANSLATIONS, STYLE_COLORS, RECIPE_POOL } from './constants';
-import { audioEngine } from './services/audioEngine';
+import { generateVibe } from './services/audioEngine';
 import Visualizer from './components/Visualizer';
 
 const App: React.FC = () => {
@@ -25,17 +25,20 @@ const App: React.FC = () => {
   const [showDJPanel, setShowDJPanel] = useState(false);
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle');
   const [hasPlayed, setHasPlayed] = useState(false);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
 
   const timerRef = useRef<number | null>(null);
   const t = TRANSLATIONS[lang];
 
   useEffect(() => {
-    // Subscribe to audio engine updates
-    audioEngine.setCallbacks(
-      (section) => setCurrentSection(section),
-      (chord) => setCurrentChord(chord)
-    );
-  }, []);
+    // Cleanup audio on unmount
+    return () => {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = '';
+      }
+    };
+  }, [currentAudio]);
 
   const toggleStyle = (style: VibeStyle) => {
     if (isPlaying) return; // Lock during playback for immersion
@@ -70,36 +73,54 @@ const App: React.FC = () => {
     if (isComposing) return;
 
     setIsComposing(true);
-    await audioEngine.initialize();
 
-    setTimeout(() => {
+    // Call Hugging Face MusicGen API
+    const audio = await generateVibe({
+      emotion: selectedEmotion,
+      styles: styles
+    });
+
+    if (!audio) {
+      alert("❌ Vibe 連接失敗，請檢查 API Token 或網路連線");
       setIsComposing(false);
-      setIsPlaying(true);
-      setHasPlayed(true); // NEW: Mark as played
-      setTimeLeft(duration);
-      audioEngine.start(styles);
+      return;
+    }
 
-      timerRef.current = window.setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            handleStop();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }, 1500); // Dramatic pause
+    setCurrentAudio(audio);
+    setIsComposing(false);
+    setIsPlaying(true);
+    setHasPlayed(true);
+    setTimeLeft(duration);
+
+    // Play the generated audio
+    audio.loop = true; // Loop the music
+    audio.volume = djControls.volume / 100;
+    audio.play();
+
+    // Start timer
+    timerRef.current = window.setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          handleStop();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   };
 
   const handleStop = () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    audioEngine.stop();
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
     setIsPlaying(false);
     setIsComposing(false);
     setTimeLeft(0);
     setCurrentSection(MusicalSection.INTRO);
     setCurrentChord("");
-    setShowDJPanel(false); // NEW: Hide DJ panel
+    setShowDJPanel(false);
   };
 
   const handleClear = (e: React.MouseEvent) => {
@@ -120,14 +141,17 @@ const App: React.FC = () => {
     if (isPlaying) return;
     const newEmotion = emotion === selectedEmotion ? null : emotion;
     setSelectedEmotion(newEmotion);
-    audioEngine.setEmotion(newEmotion);
   };
 
   // NEW: DJ Controls Handler
   const handleDJChange = (key: keyof DJControls, value: number) => {
     const newControls = { ...djControls, [key]: value };
     setDJControls(newControls);
-    audioEngine.updateDJControls({ [key]: value });
+
+    // Apply volume change to current audio
+    if (key === 'volume' && currentAudio) {
+      currentAudio.volume = value / 100;
+    }
   };
 
   // NEW: AI Learning Handlers
@@ -157,26 +181,21 @@ const App: React.FC = () => {
 
   // NEW: Export Handler
   const handleExport = async () => {
-    if (!hasPlayed) return;
+    if (!currentAudio) return;
 
-    setExportStatus('recording');
-    await audioEngine.startRecording();
+    setExportStatus('processing');
 
-    // Restart playback for recording
-    await startEngine(activeStyles);
+    // Download the current audio blob
+    const response = await fetch(currentAudio.src);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-vibe-${Date.now()}.wav`;
+    a.click();
 
-    // Wait for duration
-    setTimeout(async () => {
-      setExportStatus('processing');
-      const blob = await audioEngine.stopRecording();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ai-station-${Date.now()}.wav`;
-      a.click();
-      setExportStatus('complete');
-      setTimeout(() => setExportStatus('idle'), 2000);
-    }, duration * 1000);
+    setExportStatus('complete');
+    setTimeout(() => setExportStatus('idle'), 2000);
   };
 
   // Visual Helper: Get main color
