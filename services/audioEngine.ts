@@ -1,93 +1,81 @@
-// 檔案位置: services/audioEngine.ts
+import { VibeStyle } from '../types';
 
-import { VibeStyle, Emotion } from '../types';
+// Emotion to music prompt mapping
+const EMOTION_PROMPTS: Record<string, string> = {
+  '興奮': 'energetic and uplifting with fast tempo',
+  '平靜': 'calm and peaceful with slow tempo',
+  '憂鬱': 'melancholic and emotional with minor chords',
+  '快樂': 'joyful and cheerful with major chords',
+  '憤怒': 'intense and aggressive with heavy beats',
+};
 
-// 定義 Hugging Face 的 API URL (使用 Meta 的 MusicGen Small 模型)
-const API_URL = "https://api-inference.huggingface.co/models/facebook/musicgen-small";
-
-// ⚠️ 重要：從環境變數讀取 Hugging Face Token
-// 在 Netlify 上設置環境變數 VITE_HF_TOKEN
-const HF_TOKEN = import.meta.env.VITE_HF_TOKEN || "";
-
-export interface GenerationParams {
-  emotion: Emotion | null;
-  styles: VibeStyle[];
-}
-
-/**
- * 生成 AI 音樂 Vibe
- * @param params 包含情緒和風格的參數
- * @returns HTMLAudioElement 或 null（如果失敗）
- */
-export const generateVibe = async (params: GenerationParams): Promise<HTMLAudioElement | null> => {
-  // 1. 組合 Prompt (咒語)
-  // 將中文選項轉譯成英文 Prompt，這樣 AI 才聽得懂
-  const emotionText = params.emotion ? translateEmotion(params.emotion) : "neutral";
-  const styleTexts = params.styles.map(style => translateStyle(style)).join(", ");
-
-  const prompt = `A ${styleTexts} track with ${emotionText} mood, high quality, melodic, loops`;
-
-  console.log(`🎵 正在召喚 VIBE: ${prompt}`);
-
-  try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ inputs: prompt }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`AI 回應錯誤: ${response.status} - ${errorText}`);
-    }
-
-    // 2. 取得二進位音檔 (Blob)
-    const audioBlob = await response.blob();
-    const audioUrl = URL.createObjectURL(audioBlob);
-
-    // 3. 建立並回傳 Audio 物件
-    const audio = new Audio(audioUrl);
-    console.log("✅ 音樂生成成功！");
-    return audio;
-
-  } catch (error) {
-    console.error("❌ 生成失敗:", error);
-    return null;
-  }
+// Style to music characteristics mapping
+const STYLE_PROMPTS: Record<string, string> = {
+  '賽博': 'cyberpunk electronic synth',
+  '位元': '8-bit chiptune retro',
+  '極簡': 'minimal ambient atmospheric',
+  '爵士': 'smooth jazz with piano',
+  '搖滾': 'rock guitar driven',
+  '電子': 'electronic dance music',
+  '古典': 'classical orchestral',
+  '嘻哈': 'hip hop with beats',
+  '放克': 'funky groove bass',
+  '雷鬼': 'reggae rhythm',
 };
 
 /**
- * 簡單的翻譯 helper，把 UI 情緒轉成 AI 懂的英文
+ * Generate a music vibe based on emotion and styles
  */
-function translateEmotion(emotion: Emotion): string {
-  const map: Record<Emotion, string> = {
-    [Emotion.HAPPY]: "happy, upbeat",
-    [Emotion.SAD]: "sad, melancholic, slow",
-    [Emotion.ANGRY]: "angry, aggressive, heavy metal",
-    [Emotion.CALM]: "calm, ambient, meditation",
-    [Emotion.EXCITED]: "excited, energetic, fast tempo",
-  };
-  return map[emotion] || "neutral";
-}
+export async function generateVibe(
+  emotion: string,
+  styles: VibeStyle[],
+  duration: number = 10
+): Promise<Blob> {
+  // Build prompt from emotion and styles
+  const emotionPrompt = EMOTION_PROMPTS[emotion] || 'ambient music';
+  const stylePrompts = styles.map(style => STYLE_PROMPTS[style] || style).join(', ');
+  const fullPrompt = `${emotionPrompt}, ${stylePrompts}`;
 
-/**
- * 簡單的翻譯 helper，把 UI 風格轉成 AI 懂的英文
- */
-function translateStyle(style: VibeStyle): string {
-  const map: Record<VibeStyle, string> = {
-    [VibeStyle.CYBERPUNK]: "cyberpunk, synthwave, sci-fi",
-    [VibeStyle.LOFI]: "lo-fi hip hop, chill",
-    [VibeStyle.AMBIENT]: "dark ambient, space drone",
-    [VibeStyle.EIGHT_BIT]: "8-bit, chiptune, nintendo style",
-    [VibeStyle.CINEMATIC]: "cinematic, orchestral, hans zimmer style",
-    [VibeStyle.RETROWAVE]: "vaporwave, retro, 80s",
-    [VibeStyle.ACID]: "acid techno, tb-303",
-    [VibeStyle.TRAP]: "trap beat, hip hop",
-    [VibeStyle.DEEP_HOUSE]: "deep house, atmospheric, bass heavy",
-    [VibeStyle.GLITCH]: "glitch core, distorted, electronic",
-  };
-  return map[style] || "pop";
+  console.log('Generating music with prompt:', fullPrompt);
+
+  try {
+    // Call Netlify Function instead of direct API
+    const response = await fetch('/.netlify/functions/generate-music', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt: fullPrompt,
+        duration: duration,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Function Error:', errorData);
+
+      // Handle model loading state
+      if (response.status === 503) {
+        throw new Error('模型正在加載中，請稍後再試（約20秒）');
+      }
+
+      throw new Error(errorData.error || `請求失敗: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Convert base64 audio to Blob
+    const audioData = atob(data.audio);
+    const audioArray = new Uint8Array(audioData.length);
+    for (let i = 0; i < audioData.length; i++) {
+      audioArray[i] = audioData.charCodeAt(i);
+    }
+
+    const blob = new Blob([audioArray], { type: data.contentType });
+    return blob;
+  } catch (error) {
+    console.error('Error generating vibe:', error);
+    throw error;
+  }
 }
