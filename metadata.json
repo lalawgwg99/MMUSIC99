@@ -1,0 +1,5 @@
+{
+  "name": "AI Vibe Station",
+  "description": "A cyberpunk-styled generative music workstation using Tone.js and React. Features internationalization, real-time audio synthesis, and reactive visualization.",
+  "requestFramePermissions": []
+}
